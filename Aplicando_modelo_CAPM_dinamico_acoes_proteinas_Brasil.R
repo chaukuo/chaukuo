@@ -4,22 +4,6 @@
 
 #######################################
 
-#https://www.r-bloggers.com/2015/08/plotting-time-series-in-r-using-yahoo-finance-data/
-
-# MDL = Priori = estimativa acerca o beta ou teta. O beta é do modelo e o alfa o coeficiente do beta
-#Qual é a distribuição que assumo?
-  
-#1. com a priori, faço uma estimativa do parâmetro no futuro
-#2. vamos ter um forecast do parâmetro
-#3. faz-se um update
-
-#- o que é o F? Por que o teta tem alfa e beta?
-#- lembrar dos estados latentes
-#- precisa achar o v e o w????onde ficam o v e o w na equação? está na distribuição
-#- w é a perturbação do beta
-#- se w for muito pequeno, então o beta muda pouco ao longo do tempo
-# a linha pontilhada no final é o beta estátitico
-
 library(tidyverse)
 library(tseries)
 library(forecast)
