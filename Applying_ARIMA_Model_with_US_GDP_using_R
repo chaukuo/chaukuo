@@ -1,0 +1,769 @@
+# O PIB Ã© uma medida de atividade econÃ´mica, calculada trimestralmente
+
+# MotivaÃ§Ã£o: Existem sÃ©rie de dados cuja correlaÃ§Ã£o entre os dados no tempo restringe a aplicabilidade de mÃ©todos estatÃ­sticos convencionais que dependem do pressuposto de que as observaÃ§Ãµes sÃ£o independentes e identicamente distribuÃ­das (i.i.d.)
+
+
+## ------ Download de bibliotecas ------ 
+
+install.packages("Kendall")
+library(tidyverse)
+library(quantmod)
+
+## Dowload dos dados
+
+getSymbols("NA000334Q",src="FRED")
+
+gdp = window(ts(NA000334Q, start=c(1947,01), freq=4))
+
+### Estamos incluindo frequÃªncia igual a 4 pois a divulgaÃ§Ã£o do PIB Ã© trimestral
+
+
+## ------ AvaliaÃ§Ã£o visual da sÃ©rie ------ 
+
+chartSeries(gdp,theme="white")
+
+### Visualmente, o grÃ¡fico do PIB dos EUA parece apresentar tendÃªncia
+### Parece haver uma raiz unitÃ¡ria, mas posteriormente iremos verificar ser a sÃ©rie Ã© integrada, e em qual ordem
+### Como a sÃ©rie Ã© longa, nÃ£o Ã© possÃ­vel identificar visualmente padrÃµes sazonais
+### Desta forma, teremos que utilizar outros instrumentos, para verificar a existÃªncia de sazonalidade
+### Caso seja identificada sazonalidade na sÃ©rie, teremos que modelar via SARIMA, e nÃ£o mais ARIMA
+### Por que Ã© importante identifiar o padrÃ£o sazonal?
+
+## ------ AvaliaÃ§Ã£o de sazonalidade na sÃ©rie ------ 
+
+### Para avaliar se hÃ¡ algum padrÃ£o sazonal, iremos decompor a sÃ©rie em (i) tendÃªncia, (ii) sazonalidade e (iii) erro
+### Caso haja padrÃ£o sazonal, a identifiaÃ§Ã£o Ã© importante para que o modelo preditivo leve em conta quando hÃ¡ altas ou quedas por conta de algum evento periÃ³dico, como vendas nos dias das mÃ£es, vÃ´os em julho (fÃ©rias)
+
+### Convertendo a sÃ©rie em tipo times series
+
+sgdp <-window(ts(gdp, start=c(1947,01), end = c(2021,1), freq=4))
+
+### Iremos fazer as anÃ¡lise com a sÃ©rie sem transformaÃ§Ã£o logarÃ­tmica
+
+### Uma sÃ©rie temporal pode ser genericamente decomposta em tendÃªncia, ciclo, sazonalidade e erro
+### Uma forma de avaliar se existe sazonalidade Ã© decompondo a sÃ©rie nesses componentes
+
+plot(decompose(sgdp, type = "add"))
+
+### Pelo grÃ¡fico, Ã© possÃ­vel identificar um padrÃ£o sazonal, mas nÃ£o claramente em qual trimestre
+### Assim, mais Ã  frente iremos utilizar a ACF e PACF para ajudar a identificar o(s) trimestre(s) onde hÃ¡ efeito sazonal
+### Estamos utilizando a decomposiÃ§aÃµ aditiva pois o grÃ¡fico na aparente que hÃ¡ crescimento das "ondas" ao longo do tempo
+### O modelo aditivo em geral Ã© identificado quando a variaÃ§Ã£o sazonal Ã© relativamente constante ao longo do tempo, enquanto que o multiplicativo Ã© usado quando a variaÃ§Ã£o sazonal aumenta ao longo do tempo
+
+library(Kendall)
+### H0: nÃ£o hÃ¡ tendÃªncia na sÃ©rie
+### H1 : hÃ¡ tendÃªncia na sÃ©rie
+
+MannKendall(sgdp)
+
+### A um nÃ­vel de confianÃ§a de 5%, o p-valor do teste Mann Kendall indica que rejeitamos a hipÃ³tese nula
+### Isto Ã©, a sÃ©rie possui tendÃªncia
+### Uma alternativa para decompor em tendÃªncia e sazonalidade separadamente Ã© pelo mÃ©todo "decompose"
+
+gdp_decom <- decompose(sgdp, type = "add")
+gdp_trend = gdp_decom$trend
+plot(gdp_trend)
+
+gdp_seasonal <- gdp_decom$seasonal
+plot(gdp_seasonal)
+
+### Para avaliar como fica a junÃ§Ã£o da tendÃªncia e sazonalidade, que fora quebrada em dois anteriormente, podemos usar o script abaixo
+
+ts.plot(cbind(gdp_trend, gdp_trend + gdp_seasonal), lty = 1:2, col=1:2,lwd=2)
+
+
+## ------ 1.a Teste ACF e PACF ------ 
+
+acf(sgdp, 60)
+
+### Quando analisamos a funÃ§Ã£o de autocorrelaÃ§Ã£o (ACF), estamos analisando qual a correlaÃ§Ã£o entre dois pontos do tempo
+### O teste ACF serÃ¡ realizado na sÃ©rie no nÃ­vel, i.e, a sÃ©rie da forma como foi baixada
+### A partir do grÃ¡fico ACF, no nÃ­vel, observa-se um lento decaimento dos valores ao longo das defasagens ...
+### O lento decaimento da ACF indica que a sÃ©rie Ã© nÃ£o estacionÃ¡ria (i.e, a mÃ©dia nÃ£o Ã© constante)
+### Para verificar se a sÃ©rie Ã© nÃ£o-estacionÃ¡ria, iremos utilizar posteriormente o teste Augmented Dicker Fuller
+
+pacf(sgdp,60)
+
+### A funÃ§Ã£o PACF ou funÃ§Ã£o de autocorrelaÃ§Ã£o parcial aponta o nÃºmero de componentes autoregressivos de uma serie
+### AtrÃ¡ves da PACF da sÃ©rie "sgdp" observa-se que hÃ¡ uma correlaÃ§Ã£o serial no trimestre 1, sugerindo que tenhamos um AR(1)
+
+
+## ------ Verificando se a sÃ©rie Ã© nÃ£o estacionÃ¡ria ------
+
+### Vimos entÃ£o que hÃ¡ padrÃ£o sazonal, entÃ£o devemos utilizar o modelo SARIMA, em que os efeitos sazonais sÃ£o adicionados ao modelo
+### Agora iremos responder Ã  pergunta se a sÃ©rie Ã© integrada
+### Para avaliar, iremos utilizar o teste Augmented Dickey-Fuller (ADF), no qual a hipotÃ©se nula Ã© de que a sÃ©rie Ã© nÃ£o estacionÃ¡ria
+
+### Teste de raiz unitÃ¡ria
+### yt=c+ phi*ytâ1+erro(t)
+### H0:phi=1â¹unit root
+### H1:phi<1â¹stationarity
+
+### Download da biblioteca que possui o teste ADF
+
+library(tseries)
+library(fUnitRoots)
+adf.test(sgdp)
+
+### o p-value resultante pelo teste foi de 0.99, a 5% de confianÃ§a ou valor crÃ­tico
+### Assim, aceitamos a hipotese nula de que a serie tem raiz unitÃ¡ria e Ã© nÃ£o estacionÃ¡ria
+### Ou seja, teremos que avaliar se na primeira ou segunda diferenÃ§a jÃ¡ retiramos a nÃ£o-estacionariedade
+### Dessa forma, poderemos modelar um ARIMA, com a sÃ©rie estacionÃ¡ria
+
+## ------ 1.b Identificando as ordens p, d, q, P, Q e D ------ 
+
+### Metodologia Box Jenkins
+### ajuste de modelos ARIMA a sÃ©ries temporais de forma que a diferenÃ§a entre os valores gerados pelos modelos e os valores observados resulte em sÃ©ries de resÃ­duos de comportamento aleatÃ³rio em torno de zero (ruÃ­do branco)
+### 1. IdentificaÃ§Ã£o das ordens ARIMA (p.d,q)
+### 2. EstimaÃ§Ã£o do modelo proposto
+### usar critÃ©rios e informaÃ§Ã£o AIC ou BIC para comparar as ordens ...
+### ... ou usar o auto-arima
+### 3. DiagnÃ³stico/anÃ¡lise dos resÃ­duos
+### Lembrando que os resÃ­duos de um modelo bem ajustado devem ser um RuÃ­do Branco
+
+### Um modelo SARIMA pode ser apresentado como:
+### SARIMA(p, d, q)(P, D, Q)m
+### p = nÃºmero AR ou a defasagem utilizada para fazer previsÃ£o
+### d = integraÃ§Ã£o ou nÃºmero de diferenciaÃ§Ãµes necessÃ¡rias para tornar sÃ©rie estacionÃ¡ria
+### q = mÃ©dia mÃ³velou lag dos erros a serem usados para a previsÃ£o
+### em maiÃºscula os padrÃµes sazonais
+### m o nÃºmero de perÃ­odos por ano, ou seja, 12 meses ou 4 trimestres
+### Quando a sÃ©rie Ã© nÃ£o-estacionÃ¡ria, em geral precisamos diferenciar para trabalhar com um sÃ©rie estacionÃ¡ria
+
+### Como vimos anterioramente com o teste ADF, como a sÃ©rie Ã© nÃ£o estacionÃ¡ria, iremos diferenciÃ¡-la, para poder modelar
+### DiferenciaÃ§Ã£o: Xt = yt â ytâ1
+### O intuito da diferenciaÃ§Ã£o Ã© remover a tendÃªncia, e poder assim trabalhar com mÃ©dia constante
+### Ou seja, hÃ¡ uma reversÃ£o para a mÃ©dia, desta forma
+
+gdp_1dif = (sgdp - lag(sgdp,-1))
+
+### Importante notar que, ao diferenciar, remove-se a tendÃªncia, mas nÃ£o a dependÃªncia temporal
+
+adf.test(gdp_1dif)
+
+### O resultado ADF para a sÃ©rie na primeira diferenÃ§a mostra que a teste Ã© estacionÃ¡ria na primeira diferenÃ§a
+### Ou seja, d = S = 1, e jÃ¡ encontramos os valores para estes 2 hiperparÃ¢metros
+
+## ------ 1.b.1 IdentificaÃ§Ã£o ------ 
+
+### Para identificar agora em qual lag hÃ¡ um padrÃ£o sazonal, iremos primeiramente diferenciar a sÃ©rie de PIB
+### diferenciaÃ§Ã£o sazonal pode ser dada como  diferenÃ§a entre um valor e o valor em t-m, sendo m o padrÃ£o sazonal
+### Por exemplo, Xt - Xt-4
+
+acf(gdp_1dif,60)
+
+### O grÃ¡fico ACF - na primeira - diferenÃ§a mostra que hÃ¡ grandes picos no lag 4
+### Isso significa que podemos de fato assumir m = 4
+### Ao mesmo tempo, como hÃ¡ picos nos lags 1 e 3, parece que podemos supor q = 1
+### Para encontrar os hiperparÃ¢metros p e q, precisamos trabalhar com a sÃ©rie dessazonalizada ...
+### ... que chamaremos de gdp_des
+
+gdp_des = (gdp_1dif - lag(gdp_1dif,-4))
+
+acf(gdp_des)
+
+### Ressaltando que O processo um processo MA() Ã© sempre estacionÃ¡rio
+### Em geral, num processo estacionÃ¡rio MA() os q primeiros coeficientes da ACF sÃ£o diferentes de zero e os restantes iguais a zero
+### O grÃ¡fico da ACF nos diz que o MA pode ser de ordem 1 (MA(1)), ou talvez 2 (MA(2))
+
+pacf(gdp_des)
+
+### Para determinar a ordem "p" do modelo, utilizamos a PACF
+### A (PACF) tem como base os coeficientes de correlaÃ§Ã£o parcial
+### Ao observar a PACF, "espera-se que seja aproximadamente zero para todas as ordens superiores Ã  ordem  p do processo. Dizemos que a PACF "corta" no lag p"
+### Na funÃ§Ã£o PACF do PIB EUA, hÃ¡ efeito autoregressivo nos lags 1, ou p = 1 (AR(1))
+### indicando tambÃ©m que P = 3, dado que se observam 3 picos sazonais, e depois somem a partir do 4 ano
+
+
+## ------ 1.b.2 EstimaÃ§Ã£o ------ 
+
+### Pela avaliaÃ§Ã£o acima, temos que:
+### SARIMA = (1,1,1),(3,1,1) ou
+### SARIMA = (1,1,2),(3,1,2) ou
+### Os critÃ©rios de informaÃ§Ã£o (AIC & BIC) irÃ£o contribuir para definir o melhor modelo especificado
+
+# ------ 1.b.3 PrevisÃ£o modelo SARIMA ------ 
+
+library(forecast)
+
+fitgdp = Arima(sgdp,order=c(1,1,1),seasonal=list(order=c(3,1,1),period=4),method="ML")
+
+ggtsdisplay(residuals(fitgdp))
+
+### Agora vamos testar o segundo modelo proposta, SARIMA = (1,1,2),(3,1,2)
+
+fitgdp_2 = Arima(sgdp,order=c(1,1,2),seasonal=list(order=c(3,1,2),period=4),method="ML")
+
+### Checando com funÃ§Ã£o "auto ARIMA" se especificaÃ§Ã£o acima foi o melhor modelo
+
+library(forecast)
+autoarima_gdp = auto.arima(sgdp, max.p = 5, max.q = 5)
+summary(autoarima_gdp)
+
+### A funÃ§Ã£o auto arima retorna a seguinte especificaÃ§Ã£o:
+### SARIMA(0,1,2)(0,1,2)[4]
+### Interessante notar que o "P" do modelo auto-Arima foi bastante diferente do nosso, que fora P = 3
+
+## ------ 1.b.3.2 CritÃ©rios de informaÃ§Ã£o ------ 
+
+### ApÃ³s selecionarmos possÃ­veis modelos ARIMA para os dados observados, identificamos o melhor modelo possÃ­vel utilizando os critÃ©rios AIC e BIC
+### AIC e BIC sÃ£o medidas estatÃ­sticas para avaliar o fit de um modelo 
+### Em geral, ao comparar modelos, o que tiver menor AIC/BIC significa que Ã© o com melhor fit 
+### Ou seja, queremos encontrar as ordens k e l que minimizam os critÃ©rios AIC e BIC para a determinaÃ§Ã£o das ordens p e q do modelo
+
+fitgdp$bic
+fitgdp_2$bic
+autoarima_gdp$bic
+
+### Pelo critÃ©rio BIC, obtemos um valor de 7050 para o modelo SARIMA = (1,1,1),(3,1,1) ...
+### ...7056 para o modelo 2 ...
+### ... e 7041 para o auto-Arima
+### Ou seja, pelo critÃ©rio BIC, deverÃ­amos utilizar o modelo SARIMA(0,1,2)(0,1,2)[4] 
+
+### Uma outra forma de encontrar a melhor especificaÃ§Ã£o de modelo SARIMA seria testando vÃ¡rios p, d, q, P, D e Q
+### Para fazer isso, abaixo hÃ¡ um script que realiza vÃ¡rios modelos
+### Ao mesmo tempo, nos fornece o BIC
+
+bic = matrix(NA, 16, 7 )
+w=1
+for (i in 0:1)
+  for (j in 0:1)
+    for (k in 0:1)
+      for (l in 0:1){
+        sarima.fit = Arima(sgdp, order=c(i,1,j),seasonal=list(order=c(k,1,l),period=4)) 
+        
+        bic[w,] = c(i,1,j,k,1,l,round(sarima.fit$bic,1))
+        w = 1 + w
+        
+      }
+
+table = bic
+colnames(table) = c('p','d','q','P','D','Q','BIC')
+rownames(table) = paste("Modelo", 1:nrow(table), sep = "")
+
+table
+
+which(table[,7] == min(table[,7]))
+
+### Pelo mÃ©tido acima, o melhor modelo SARIMA especificado seria (0, 1, 1)(0, 1, 1)4
+
+### modelo 4 obtido pelo loop BIC
+fitgdp_3 = Arima(sgdp,order=c(1,1,1),seasonal=list(order=c(0,1,1),period=4),method="ML")
+
+### Testando via AIC
+
+AIC(fitgdp)
+AIC(fitgdp_2)
+AIC(fitgdp_3)
+AIC(autoarima_gdp)
+
+### Pelo critÃ©rio AIC, obtemos um valor de 7024 para o modelo SARIMA = (1,1,1),(3,1,1) ...
+### ...7023.8 para o modelo 2, 7029 para o modelo 3 (espificado pelo loop BIC) ...
+### ... e 7023.4 para o auto-Arima
+### Interessante notar que, pelo critÃ©rio AIC, o modelo 3 nÃ£o Ã© o melhor
+### Ou seja, pelo critÃ©rio AIC, tambpem deverÃ­amos utilizar o modelo SARIMA(0,1,2)(0,1,2)[4] 
+
+
+## ------ 1.c.3 DiagnÃ³stico residual ------ 
+
+### Um ruÃ­do branco se caracteriza por apresentar covariÃ¢ncia para as defasagens sÃ£o sempre iguais Ã  zero
+
+checkresiduals(fitgdp)
+checkresiduals(autoarima_gdp)
+
+par(mfrow=c(1,2))
+acf(residuals(fitgdp),24,main="")
+pacf(residuals(fitgdp),24,main="")
+
+par(mfrow=c(1,2))
+acf(residuals(autoarima_gdp),24,main="")
+pacf(residuals(autoarima_gdp),24,main="")
+
+### Tanto a ACF quanto a PACF apresentam os pontos dentro do intervalo de confianÃ§a
+### Isto Ã© uma primeira indicaÃ§Ã£o de que os resÃ­duos nÃ£o devem ser correlacionados
+### Iremos realizar mais um teste, de Ljung-Box, para verificar se os resÃ­duos sÃ£o um ruÃ­do branco
+
+### Testes Ljung Box
+### HipÃ³tese nula = os resÃ­duos sÃ£o i.i.d
+### HipÃ³tese alternativa = os resÃ­duos nÃ£o sÃ£o i.i.d
+### Se as autocorrelaÃ§Ãµes forem muito pequenas, concluimos que o modelo nÃ£o exibe falha significativa de ajuste
+
+Box.test(fitgdp$residuals, lag=24, fitdf=4, type="Ljung")
+Box.test(autoarima_gdp$residuals, lag=24, fitdf=4, type="Ljung")
+
+### Rejeita-se a hipÃ³tese nula, de que os resÃ­duos sÃ£o i.i.d
+### Ou seja, os erros nÃ£o sÃ£o um ruÃ­do branco e, portanto, o modelo precisa ser re-especificado
+
+
+## ------ 1.d Escolha do modelo ------ 
+
+### Aqui, iremos fazer projeÃ§Ã£o somente para oito trimestres Ã  frente (h = 8)
+### Iremos utilizar o modelo (0, 1, 1)(1, 1, 0)4, conforme especificado no modelo supracitado via loop BIC
+
+plot(forecast(fitgdp2,h=8))
+plot(forecast(autoarima_gdp,h=8))
+
+### InterpretaÃ§Ã£o do forecast SARIMA:
+### o modelo aponta uma queda sazonal logo apÃ³s o Ãºltimo dado disponÃ­vel
+### Em seguida, o modelo aponta uma retomada do crescimento,de modo que o PIB dos EUA ficam acima do nÃ­vel prÃ©-pandemia
+### No entanto, o nosso modelo parece apontar para um crescimento mais rÃ¡pido ...
+### ... enquanto o auto-ARIMA uma recuperaÃ§Ã£o mais lenta
+### Para nÃ³s, o comportamento das projeÃ§Ãµes do modelo auto-ARIMA parecem ser melhores
+### Assim, utilizarÃ­amos seus forecast para prever o PIB EUA futuro
+
+## ------ 1.e.4 MÃ©todo Prophet ------ 
+
+### Prophet is a time series model developed by Facebook that aims to automate more technical aspects of time series forecasting, such as selection of trend and seasonality parameters
+### pacote Prophet tem como default uma modelagem da sazonalidade aditiva
+### Para o caso do PIB dos EUA, pode ser um caso de aplicaÃ§Ã£o
+
+library(prophet)
+library(xts)
+PIB <- sgdp
+df <- data.frame(ds = index(as.xts(PIB)),y = coredata(as.xts(PIB)))
+m <- prophet(df)
+future <- make_future_dataframe(m, 8, freq = 'q')
+forecast <- predict(m, future)
+plot(m, forecast)
+
+### O forecast utilizando o Prophet, com mÃ©todo aditivo, apresenta maior disperÃ§Ã£o no final da curva
+### Isto Ã©, parece haver um menor fit nos anos mais recentes
+### O que pode ser dar por alguma mudanÃ§a estrutural que o modelo nÃ£o captura
+
+### Com sazonalidade multiplicativa
+
+smult <- prophet(df, seasonality.mode = 'multiplicative')
+future <- make_future_dataframe(smult, 8, freq = 'q')
+forecast <- predict(smult, future)
+plot(smult, forecast)
+
+## ------ 1.b.5 Back test ------ 
+
+### Iremos agora modelar com dados atÃ© o 2o trimestre de 2020, e nÃ£o mais atÃ© o 1o trimestre de 2021
+### A ideia Ã©, a partir do modelo, fazer projeÃ§Ãµes do trimestres 3T/20 a 1T/2021 ...
+### ... e entÃ£o comparar com os dados realizados, de forma a observar o fit do modelo
+### Como acima (seÃ§Ã£o 1.d) escolhemos o modelo auto-ARIMA (0,1,2)(0,1,2)[4], iremos fazer o modelo back test com esta especificaÃ§Ã£o
+
+gdp_bt <- Arima(window(sgdp,end=c(2020,2)), order=c(0,1,2),seasonal=list(order=c(0,1,2),period=12))
+
+gdp_btf <- forecast(gdp_bt,h=12)
+
+plot(forecast(gdp_bt,h=12), lwd=1)
+lines(tail(sgdp,12),lwd=2)
+
+library(fpp)
+train <- window(sgdp,end=2019.12)
+fit <- auto.arima(train)
+refit <- Arima(sgdp, model = fit)
+fc <- window(fitted(refit), start=1990)
+plot(fc, lwd=1)
+lines(tail(sgdp,12),lwd=2)
+
+h <- 5
+train <- window(sgdp,end=2020.02)
+test <- window(sgdp,start=1990)
+n <- length(test) - h + 1
+fit <- auto.arima(train)
+order <- arimaorder(fit)
+fcmat <- matrix(0, nrow=n, ncol=h)
+for(i in 1:n)
+{  
+  x <- window(hsales, end=2020.02 + (i-1)/12)
+  refit <- Arima(x, order=order[1:3], seasonal=order[4:6])
+  fcmat[i,] <- forecast(refit, h=h)$mean
+}
+
+
+ts(fc)
+nrow(ts(sgdp))
+
+h <- 5
+train <- window(sgdp,end=2020.02)
+test <- window(sgdp,start=1990.01)
+n <- length(test) - h + 1
+fit <- auto.arima(train)
+fc <- ts(sgdp, start=1990+(h-1)/4, freq=4)
+for(i in 1:n)
+{  
+  x <- window(sgdp, end=2020.02 + (i-1)/4)
+  refit <- Arima(x, model=fit)
+  fc[i] <- forecast(refit, h=h)$mean[h]
+}
+plot(fc, lwd=1)
+lines(tail(sgdp,4),lwd=2)
+
+library(fpp)
+train <- window(sgdp,end=2018.04)
+refit <- Arima(sgdp, model=fit)
+fc <- window(fitted(refit), start=2019.01)
+plot(fc, lwd=1)
+lines(tail(sgdp,12),lwd=2)
+
+### Pelo grÃ¡fico, em que se compara o observado (cor mai escura) e o modelo (azul), o que se observa Ã© que o modelo nÃ£o consegue capturar a queda da atividade econÃ´mica oriunda da pandemia, talvez sendo necessÃ¡ria uma dummy neste ano
+### AlÃ©m disso, nos trimestres posteriores Ã  pandemia, o modelo tambÃ©m superestima, o que significa que Ã© preciso fazer uma melhor especificaÃ§Ã£o
+
+
+## ------ ExercÃ­cio 2 ------ 
+
+# MotivaÃ§Ã£o: SÃ©ries de dados financeiros possuem uma caracterÃ­sticas chamada de heterocedasticidade condicional (aglomeraÃ§Ã£o de volatilidade)
+# Ou seja,a variÃ¢ncia da sÃ©rie da volatilidade nÃ£o Ã© constante
+# Iremos trabalhar com a sÃ©rie de aÃ§Ãµes S&P dos EUA
+
+### Buscando os dados da sÃ©rie S&P 500
+
+library(quantmod) 
+
+getSymbols("^GSPC", src = "yahoo")
+head(GSPC)
+tail(GSPC)
+sp500 <- GSPC$GSPC.Adjusted
+
+### O campo "Adjusted" da sÃ©riÃ© o mesmo que o close (preÃ§o de fechamento)
+
+### Plotar o grÃ¡fico da sÃ©rie
+
+barChart(GSPC)      
+chartSeries(sp500) 
+plot(sp500) 
+
+### Avaliando visualmente a sÃ©rie histÃ³rica S&P 500, pode-se verificar que a sÃ©rie possui um comportamento errÃ¡tico
+### Isto Ã©, hÃ¡ vÃ¡rios perÃ­odos de baixas
+### Pelo grÃ¡fico, pode-se observar que hÃ¡ uma tendÃªncia na sÃ©rie
+### Assim, as sÃ©ries financeiras podem ser nÃ£o estacionÃ¡rias, assim como os dados da economia real (como PIB ou vendas no varejo)
+### Portanto, assim como trabalhamos com dados econÃ´micos, ao modelar sÃ©ries financeiras, torna-se importante trabalhar com dados estacionÃ¡rios
+
+## ------ Fatos estilizados de sÃ©ries financeiras ------ 
+
+### Enquanto em dados econÃ´micos analisa-se o dado per se ...
+### ... no caso de ativos financeiros se modela os retornos dos preÃ§os
+### Ou retorno = log(Pt / Pt-1) = log(Pt) - log(pt-1)
+### Isto porque, conforme supracitado, preÃ§os podem apresentar tendÃªncia e nÃ£o-estacionariedade
+### Por outro lado, quando se modela com retorno dos ativos, hÃ¡ as vantagens das seguintes propriedades estatÃ­sticas
+### 1. a sÃ©rie de retorno possui uma distribuiÃ§Ã£o nÃ£o-normal
+### 2. a sÃ©rie de retorno possui pouca autocorrelaÃ§Ã£o
+### 3. hÃ¡ autocorrelaÃ§Ã£o do retorno ao quadrado, que decai lentamente
+
+### A nÃ£o-normalidade dos retornos acarreta caudas pesadas da distribuiÃ§Ã£o
+### TambÃ©m possui assimetria, i.e, mais retornos negativos do que positivos
+
+### Deve-se salientar que "clusters de volatilidade":
+### um perÃ­odo volÃ¡til costuma ser seguido por outro perÃ­odo volÃ¡til 
+### estatisticamente, clusters de volatilidade inerentemente apresentam variÃ¢ncia condicional
+
+## ------ AvaliaÃ§Ã£o ACF, normalidade, assimetria e curtose da sÃ©rie ------ 
+
+### Conforme vimos acima, ao se tratar tratar de ativos financeiros, o mais apropriado Ã© trabalhar com o retorno, jÃ¡ que pode haver nÃ£o-estacionariedade na sÃ©rie de preÃ§os
+
+acf(sp500, 60)
+
+### A ACF da sÃ©rie S&P 500 mostra um decaimento bastante lento, indicando que a sÃ©rie nÃ£o Ã© estacionÃ¡ria
+### Mas vamos utilizar o teste ADF para corroborar a validade do ACF
+
+library(tseries)
+library(fUnitRoots)
+adf.test(sp500)
+
+### A 5% de confianÃ§a, rejeitamos a hipÃ³tese nula de que a sÃ©rie Ã© estacionÃ¡ria
+### Assim, torna-se importante trabalhar com a S&P 500 na diferenÃ§a (ou retorno)
+### Criando a sÃ©rie de retornos da S&P500
+
+GSPC.rtn = diff(log(sp500))[-1]
+
+plot(GSPC.rtn)
+
+### A olhar o grÃ¡fico do retorno, observa-se que variÃ¢ncia nÃ£o Ã© constante ao longo da sÃ©rie
+### O que significa que a sÃ©rie Ã© heterocedÃ¡stica
+
+acf(GSPC.rtn, 60)
+
+### A ACF da sÃ©rie do retorno nÃ£o apresenta lento decaimento e cai rapidamente para zero
+### Portanto, Ã© uma sÃ©rie estacionÃ¡ria 
+### Abaixo mostramos graficamente a distribuiÃ§Ã£o da sÃ©rie de retorno
+
+library(fBasics)
+basicStats(GSPC.rtn)
+hist(GSPC.rtn, breaks = 50,freq = FALSE) # Histogram
+x=seq(-.1,.1,.001) # Create a sequence of x with increment 0.001.
+y1=dnorm(x,mean(GSPC.rtn),stdev(GSPC.rtn))
+d1=density(GSPC.rtn)
+plot(d1$x,d1$y,xlab='ret',ylab='density',type='l',lwd=2)
+lines(x,y1,lty=2, col=2, lwd=2)
+
+### O pode ser observar Ã© que a curva de distribuiÃ§Ã£o, conforme citada acima, nÃ£o Ã© uma normal
+### Avalia-se que, de fato, as caudas sÃ£o mais pesadas e hÃ¡ muita curtose
+
+shapiro.test(as.vector(GSPC.rtn))
+
+### Uma outra forma de avaliar a nÃ£o normalidade Ã© utilizando o teste Shapira-Wilk
+### HipÃ³tese nula = sÃ©rie possui distribuiÃ§Ã£o normal
+### HipÃ³tese alternativa = nÃ£o possui distribuiÃ§Ã£o normal
+### A um alfa de 5%, pelo teste Shapiro-Wilk, rejeita-se a hipÃ³tese de que a sÃ©rie tenha distribuiÃ§Ã£o normal
+
+### Ao verificar o tipo da distribuiÃ§Ã£o de uma sÃ©rie, podemos tambÃ©m avaliar o skewness e a curtose
+### O skewness Ã© uma medida de simetria da distribuiÃ§Ã£o
+### Se o valor de um teste skewness Ã© igual a zero, entÃ£o a distribuiÃ§Ã£o Ã© simÃ©trica
+### Se o valor de um teste de skewness Ã© negativo, significa que a mÃ©dia da distribuiÃ§Ã£o Ã© menor do que a mediana
+### Desta forma, a distribuiÃ§Ã£o tem um viÃ©s maior para a esquerda
+
+library(moments)
+skewness(GSPC.rtn)
+
+### O valor obtido para o skewness da S&P 500 Ã© -0.557
+### Isto implica dizer que hÃ¡ uma distribuiÃ§Ã£o maior para valores negativos
+### O que estÃ¡ em consonÃ¢ncia com o fato estilizado de que as sÃ©ries financeiras sÃ£o assimÃ©tricas ...
+### ... e possuem mais valores negativos
+
+### JÃ¡ a curtose Ã©  uma medida de dispersÃ£o que caracteriza o "achatamento" da curva da funÃ§Ã£o de distribuiÃ§Ã£o
+### Ou seja, a curtose Ã© uma medida da cauda de uma distribuiÃ§Ã£o. Uma distribuiÃ§Ã£o normal possui curtose igual a zero
+### Uma curtose com valor negativo indica um pico mais tÃªnue, um corpo mais grosso e uma cauda mais fina que a distribuiÃ§Ã£o normal
+### Um valor positivo costuma indicar um pico mais agudo, um corpo mais fino e uma cauda mais gorda que a distribuiÃ§Ã£o normal
+
+kurtosis(GSPC.rtn)
+
+### Para a sÃ©rie S&P 500, a curtose obtida foi de 15.9
+
+### AlÃ©m do retorno, tambÃ©m iremos trabalhar com a sÃ©rie de volatilidade de um ativo financeiro, no caso a S&P 500
+### A volatilidade pode ser caracterizada como o retorno ao quadrado
+### Criando a sÃ©rie de retornos quadrados da S&P500
+
+GSPC.rtn2 = GSPC.rtn**2
+ret <- GSPC.rtn
+ret2 <- GSPC.rtn2
+
+acf(ret2, 60)
+
+### A ACF da volatilidade mostra lags diferentes zero, o que aponta para uma memÃ³ria da volatilidade, ou auto-correlaÃ§Ã£o serial
+
+### O ACF dos retornos mostra um autocorrelaÃ§Ã£o na primeira defasagem
+
+plot(GSPC.rtn2)
+acf(GSPC.rtn2, 60)
+
+## ------ Teste de efeitos ARCH/GARCH na sÃ©rie ------ 
+
+### Citamos acima que uma caracterÃ­stica de sÃ©rie de dados de ativos financeiros Ã© a heterocedasticidade condicional
+### Para verificar a heterocedasticidade, podemos avaliar via teste Ljung-Box ou Lagrange Multiplier
+### O teste Ljung Box indica a existÃªncia de autocorrelaÃ§Ã£o (hipÃ³tese nula)
+### Ao passo que o Lagrange Multiplier se hÃ¡ autocorrelaÃ§Ã£o dos retornos ao quadrado
+### Isto Ã©, HipÃ³tese nula de alpha_1=...=alpha_p = 0
+
+Box.test(ret2, lag = 12, type =c("Ljung-Box"))
+
+# Pelo teste Ljung Box, a 5% de confianÃ§a, rejeitamos a hipÃ³tese de que os retornos quadrados sÃ£o nÃ£o autocorrelacionados
+
+library(FinTS)
+library(fDMA)
+ArchTest(ret2, lag = 12)
+
+### Pelo teste ARCH LM, a 5% de confianÃ§a, rejeitamos a hipÃ³tese de que os retornos quadrados sÃ£o nÃ£o autocorrelacionados
+### Ou seja, hÃ¡ efeitos ARCH/GARCH na sÃ©rie da S&O 500
+
+
+## ------ Modelagem da sÃ©rie S&P 500 ------ 
+
+### AtÃ© agora, vimos que: a sÃ©rie da S&P atende Ã s propriedades dos fatos estilizados e que hÃ¡ efeitos ARCH/GARCH
+### Agora, para modelar um ARCH/GARCH, Ã© preciso encontrar as ordens AR dos retornos e retornos ao quadrado para encontrar a melhor especificaÃ§Ã£o ARCH/GARCH
+### Para identificar os lags, iremos avaliar a ACF e PACF dos retornos e da volatilidade
+
+#########################
+##        ARCH 
+#########################
+
+### Recordando que, em um modelo ARCH, a formalizaÃ§Ã£o se dÃ¡ por:
+### r(t) = u(t) + (raiz quadrada(h(t)) * erro(t)
+### no qual r(t) Ã© o retorno
+### o erro Ã© um ruÃ­do branco (mÃ©dia zero e variÃ¢ncia 1)
+### Ao mesmo tempo, os retornos nÃ£o sÃ£o autocorrelacionados (premissa dos mercados eficientes), mas a volatilidade sim (portanto, pode ser modelada)
+### No processo ARCH, estamos apenas encontrar os lags AR()
+
+### Assim, o modelo ARCH Ã© composto por 3 items:
+### uma mÃ©dia constante u(t)
+### volatilidade h(t)
+### e erros
+
+acf(ret)
+pacf(ret)
+
+### Pela ACF, observa-se 1 lag ...
+### ... ao passo que a PACF mostra auto-correlaÃ§Ã£o no primeiro perÃ­odo
+
+acf(ret2)
+pacf(ret2)
+
+### A PACF da volatilidade ou retorno ao quadrado mostra auto-correlaÃ§Ã£o na ordem 1 ou 2, e iremos testar as duas variantes
+### Ou seja, pela ACF e PACF verifica-se que hÃ¡ possÃ­veis combinaÃ§Ãµes para se chegar Ã  melhor especificaÃ§Ã£o
+### Importante ressaltar que, para identificar o nÃºmero de lags da parte AR(), devemos olhar a ACF e PAC do retorno ao quadrado
+
+### Assim, pela anÃ¡lise ACF/PACF, podemos ter duas especificaÃ§Ãµes ARCH:
+### ARCH(1)
+### ARCH(2)
+
+library("fGarch")
+arch1 = garchFit(~garch(1,1),data=ret,trace=F, include.mean = FALSE)
+arch1@fit$matcoef
+
+summary(arch1)
+
+### Pelos resultados obtidos em "arch1", temos entÃ£o a seguinte especificaÃ§Ã£o:
+
+### u(t) = omega = 3.071e-06
+### h(t) = alpha1 + beta1 = 1.455e-01 + 8.335e-01
+
+### Realizando ARCH agora com 2 lags
+
+arch2 = garchFit(~garch(2,1),data=ret,trace=F, include.mean = FALSE)
+arch2@fit$matcoef
+
+summary(arch2)
+
+### Pelo critÃ©rio AIC, temos os seguintes resultados:
+### arch1: -6.461140 
+### arch2: -6.463078
+
+### Apesar da pequena diferenÃ§a, a especificaÃ§Ã£o de um ARCH(2) Ã© melhor comparativamente ao um ARCH(2)
+
+### ----- AnÃ¡lise dos resÃ­duos -----
+
+### Iremos agora verificar se os erros de nosso ARCH(1) acima especificado sÃ£o ruÃ­do branco
+### O primeiro passo Ã© construir a sÃ©rie de erros
+
+resi=residuals(arch2,standardize=T)
+par(mfrow=c(1,2))
+ts.plot(resi)
+acf(resi)
+pacf(resi)
+
+### Pela ACF e PACF da sÃ©rie dos resÃ­duos, observa-se que parece nÃ£o haver autocorrelaÃ§Ã£o serial
+### Podemos corroborar olhando o teste Ljung-Box
+### HipÃ³tese nula: resÃ­duos sÃ£o auto-correlacionados
+### HipÃ³tese alternativa: resÃ­duos sÃ£o independentes
+
+Box.test(resi,lag=20,type="Ljung")
+
+### O p-valor obtido foi de 0.0559
+### Ou seja, a 5% de confianÃ§a, deverÃ­amos aceitar a hipÃ³tese nula
+### No entanto, dada a pouca diferenÃ§a, iremos rejeitar a hipÃ³tese nula
+
+### Como existe uma chance dos resÃ­duos nÃ£o serem um ruÃ­do branco ...
+### ... iremos modelar um ARCH, assumindo que os erros possuem uma distribuiÃ§Ã£o t-Student
+
+arch2_st = garchFit(~garch(2,1),data=ret,trace=F, include.mean = FALSE, cond.dist="std")
+arch2_st@fit$matcoef
+
+plot(arch2_st, which = 3)
+
+summary(arch2_st)
+
+### Utilizando uma distribuiÃ§Ã£o t-Student para nosso ARCH(2), obtemos um AIC de -6.526
+### Ou seja, menor do que o obtido assumindo distribuiÃ§Ã£o normal, de -6.463
+
+resi_st=residuals(arch2_st,standardize=T)
+par(mfrow=c(1,2))
+ts.plot(resi_st)
+acf(resi_st)
+pacf(resi_st)
+
+Box.test(resi_st,lag=20,type="Ljung")
+
+### Interessante que, pelo Ljung-Box com distribuiÃ§Ã£o t-Student, o p-valor Ã© de 0.0.65
+### Ou seja, a 5% rejeitamos a hipÃ³tese nula
+
+#####################
+# Modelo GARCH
+#####################
+
+### Os modelos ARCH possuem certas desvantagens, como:
+### choques positivos e negativos possuem os mesmos efeitos, o que nÃ£o necessariamente Ã© verdadeiro
+### difÃ­cil de capturar no modelo a curtose, dessa forma, podendo nÃ£o ter bom fit
+### o modelo nÃ£o fornece a fonte de variaÃ§Ãµes de uma sÃ©rie temporal financeira
+### Os modelos provavelmente superestima a volatilidade porque responde lentamente a grandes choques isolados na sÃ©rie de retorno
+
+### EntÃ£o, dadas as limitaÃ§Ãµes do modelo ARCH, temos o modelo GARCH ...
+### ... no qual a volatilidade depende dela mesma de forma defasada
+### Ou seja, depende do retorno ao quadrado, assim como a volatilidade defasada
+
+garchsp500_1 = garchFit(~garch(1,1),data=ret,trace=F,include.mean=F)
+
+garchsp500_1@fit$matcoef
+
+plot(garchsp500_1, which = 3)
+
+summary(garchsp500_1)
+
+garchsp500_2 = garchFit(~garch(2,1),data=ret,trace=F,include.mean=F)
+
+garchsp500_2@fit$matcoef
+
+summary(garchsp500_2)
+
+predict(garchsp500_2)
+
+pred <- predict(garchsp500_2, n.ahead = 40)
+
+dat <- as.ts(c(sqrt(garchsp500_2@h.t), pred = pred$standardDeviation))
+
+plot(window(dat, start = start(dat), end = 3631), col = "blue",
+     xlim = range(time(dat)), ylim = range(dat),
+     ylab = "Conditional SD", main = "Prediction based on GARCH model")
+
+par(new=TRUE)
+
+plot(window(dat, start = 1000), col = "red", axes = F, xlab = "", ylab = "", xlim = range(time(dat)), ylim = range(dat))
+
+nrow(ts(sp500))
+
+### Mediante o modelo GARCH, para a sÃ©rie de volatilidade da S&P500, obtemos:
+### para 1 lag AIC igual a 6.46114
+### para 2 lags AIC igual a 6.4630
+### Ou seja, uma especificaÃ§Ã£o GARCH com 2 lags possui melhor desempenho
+
+### Agora, uma forma de comparar os modelos ARCH(2) e GARCH(2), que obtivemos nos passos atrÃ¡s, Ã© utilizar o pacote rugarch
+### AtravÃ©s dele Ã© possÃ­vel obter o erro quadrado mÃ©dio
+### O que se pode concluir Ã© o que o GARCH supera o ARCH, por esta comparaÃ§Ã£o
+
+library(rugarch)
+spec <- ugarchspec(mean.model = list(armaOrder = c(2,1)),
+                   variance.model = list(garchOrder=c(2,1)),
+                   distribution.model = "std")
+garchroll <- ugarchroll(spec, data = ret, n.start = 2000,
+                        refit.window = "expanding", refit.every = 1000)
+preds <- as.data.frame(garchroll)
+
+# Prediction error for the mean
+e  <- preds$Realized - preds$Mu  
+# Prediction error for the variance
+d  <- e^2 - preds$Sigma^2 
+# Mean of prediction error
+mean(d^2)
+
+
+## ------ Existe correlaÃ§Ã£o entre S&P 500 e PIB EUA ------ 
+
+
+library(roll)
+sp3m = roll_mean(sp500,66)
+
+data <- Quandl("GSPC$GSPC.Adjusted", collapse="monthly")
+
+sp_ts <- ts(sp500, start=c(2007,1), frequency = 365)
+nrow(sp_ts)
+
+spq <- to.monthly(sp500)
+nrow(spq)
+
+nrow(gdp)
+
+library(dplyr)
+spq <- aggregate(sp_ts, nfrequency = 4, mean)
+
+cor(gdp, spq)
+
+### Como o dado de S&P Ã© diÃ¡rio, ao passo que o PIB Ã© trimestral, precisamos transformar o dado S&P em trimestral
+### Como critÃ©rio, iremos considerar a mÃ©dia mÃ³vel trimestral do S&P, i.e, a mÃ©dia movel de 90 dias
+### No nÃ­vel, como as duas sÃ©ries posseum tendÃªncia, existe uma correlaÃ§Ã£o (94%). No entanto, quando comparamos a variaÃ§Ã£o em comparaÃ§Ã£o ao mesmo perÃ­odo do ano anterior, a correlaÃ§Ã£o cai para 65%
+### Ou seja, nÃ£o necessariamente a queda do PIB no perÃ­odo t implica em queda do S&P500
+### Isto porque o S&P500 estÃ¡ capturando as expectativas futuras dos agentes quanto ao desempenho das empresas ...
+### ... enquanto o PIB Ã© uma fotografia de um acontecimento passado
+### O 2T2020 Ã© um bom exemplo disso. Enquanto o PIB dos EUA se retraiu 7.25% Y.o.Y, a S&P subiu 8%
+### Ou seja, os mercados nÃ£o mais estavam preocupados com o impacto ocorrido da covid-19 ...
+### ...mas sim dos efeitos futuros sobre a economia das polÃ­ticas econÃ´micas e fiscais
