@@ -1,6 +1,6 @@
 #######################################
 
-# Parte 3: Dynamic Linear Models (DLM)
+Dynamic Linear Models (DLM)
 
 #######################################
 
